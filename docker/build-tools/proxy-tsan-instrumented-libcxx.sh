@@ -38,8 +38,8 @@ pushd tsan || exit
 cmake \
 -GNinja \
 -DLLVM_ENABLE_PROJECTS="libcxxabi;libcxx" \
--DLLVM_USE_LINKER=lld \
--DLLVM_USE_SANITIZER=Thread \
+-DLLVM_USE_LINKER=gold \
+-DLLVM_USE_SANITIZER=Address \
 -DCMAKE_BUILD_TYPE=Release \
 -DCMAKE_C_COMPILER=clang \
 -DCMAKE_CXX_COMPILER=clang++ \

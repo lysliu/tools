@@ -29,10 +29,10 @@ ARG GOLANG_IMAGE=golang:1.18.2
 # hadolint ignore=DL3006
 FROM ${GOLANG_IMAGE} as binary_tools_context
 # TARGETARCH is an automatic platform ARG enabled by Docker BuildKit.
-ARG TARGETARCH
+ARG TARGETARCH=s390x
 
 # Istio tools SHA that we use for this image
-ARG ISTIO_TOOLS_SHA
+ARG ISTIO_TOOLS_SHA=5e0cab464228552e911b253eaed38cefcc9a13a8
 
 # Pinned versions of stuff we pull in
 ENV BOM_VERSION=v0.2.2
@@ -74,7 +74,7 @@ ENV KUBETEST2_VERSION=92c12f91d13cbe9f17b62c7b0803d31e4c40431c
 ENV BOSKOSCTL_VERSION=c6d730e323f06da1b56dfa14bdab6d7d5dc22e2a
 ENV COSIGN_VERSION=v1.8.0
 ENV CRANE_VERSION=v0.8.0
-
+ENV ART_PASS={YOUR_ARTIFACTORY_TOKEN}
 ENV GO111MODULE=on
 ENV GOPROXY=https://proxy.golang.org
 
@@ -92,6 +92,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
     curl \
+    shellcheck \
+    haskell-stack \
     gnupg2 \
     software-properties-common \
     unzip \
@@ -103,6 +105,7 @@ RUN set -eux; \
     case $(uname -m) in \
         x86_64) export PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-x86_64.zip;; \
         aarch64) export PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-aarch_64.zip;; \
+        s390x) export PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-s390_64.zip;; \
         *) echo "unsupported architecture"; exit 1 ;; \
     esac; \
     \
@@ -112,9 +115,12 @@ RUN set -eux; \
     chmod +x ${OUTDIR}/usr/bin/protoc
 
 # Install gh
-ADD https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.deb /tmp/
-RUN dpkg -i /tmp/gh_${GH_VERSION}_linux_${TARGETARCH}.deb
-RUN mv /usr/bin/gh ${OUTDIR}/usr/bin
+RUN curl --silent --header "X-JFrog-Art-Api:$ART_PASS" https://eu.artifactory.swg-devops.com/artifactory/sys-zaas-k8s-generic-local/istio/gh_${GH_VERSION} --output "gh"
+RUN mv gh ${OUTDIR}/usr/bin; \
+chmod +x ${OUTDIR}/usr/bin/gh
+# ADD https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.deb /tmp/
+# RUN dpkg -i /tmp/gh_${GH_VERSION}_linux_${TARGETARCH}.deb
+# RUN mv /usr/bin/gh ${OUTDIR}/usr/bin
 
 # Build and install a bunch of Go tools
 RUN go install -ldflags="-s -w" google.golang.org/protobuf/cmd/protoc-gen-go@${GOLANG_PROTOBUF_VERSION}
@@ -172,23 +178,23 @@ RUN git clone https://github.com/kubernetes/test-infra --branch master --single-
   go install ./pkg/benchmarkjunit && \
   cd .. && rm -rf test-infra
 # hadolint ignore=DL3003
-RUN git clone --depth 1 https://github.com/istio/test-infra --branch master --single-branch && \
-  cd test-infra && \
-  go install ./toolbox/githubctl && \
-  go install ./boskos/cmd/mason_client && \
-  cd .. && rm -rf test-infra
-# hadolint ignore=DL3003
-RUN git clone --depth 1 https://github.com/kubernetes-sigs/boskos --branch master --single-branch && \
-  cd boskos && \
-  go install ./cmd/boskosctl && \
-  cd .. && rm -rf boskos
+# RUN git clone --depth 1 https://github.com/istio/test-infra --branch master --single-branch && \
+#   cd test-infra && \
+#   go install ./toolbox/githubctl && \
+#   go install ./boskos/cmd/mason_client && \
+#   cd .. && rm -rf test-infra
+# # hadolint ignore=DL3003
+# RUN git clone --depth 1 https://github.com/kubernetes-sigs/boskos --branch master --single-branch && \
+#   cd boskos && \
+#   go install ./cmd/boskosctl && \
+#   cd .. && rm -rf boskos
 
 # Compress the Go tools and put them in their final location
-ADD https://github.com/upx/upx/releases/download/v${UPX_VERSION}/upx-${UPX_VERSION}-${TARGETARCH}_linux.tar.xz /tmp
-RUN tar -xJf upx-${UPX_VERSION}-${TARGETARCH}_linux.tar.xz -C /tmp
-RUN mv /tmp/upx-${UPX_VERSION}-${TARGETARCH}_linux/upx /usr/bin
-RUN upx --lzma /tmp/go/bin/*
-RUN mv /tmp/go/bin/* ${OUTDIR}/usr/bin
+# ADD https://github.com/upx/upx/releases/download/v${UPX_VERSION}/upx-${UPX_VERSION}-${TARGETARCH}_linux.tar.xz /tmp
+# RUN tar -xJf upx-${UPX_VERSION}-${TARGETARCH}_linux.tar.xz -C /tmp
+# RUN mv /tmp/upx-${UPX_VERSION}-${TARGETARCH}_linux/upx /usr/bin
+# RUN upx --lzma /tmp/go/bin/*
+# RUN mv /tmp/go/bin/* ${OUTDIR}/usr/bin
 
 # Add gen-release-notes templates to filesystem
 RUN mkdir -p ${OUTDIR}/usr/share/gen-release-notes
@@ -198,29 +204,39 @@ ADD https://raw.githubusercontent.com/istio/tools/master/cmd/gen-release-notes/t
 RUN chmod -R 555 ${OUTDIR}/usr/share/gen-release-notes
 
 # ShellCheck linter
-RUN wget -nv -O "/tmp/shellcheck-${SHELLCHECK_VERSION}.linux.$(uname -m).tar.xz" "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.$(uname -m).tar.xz"
-RUN tar -xJf "/tmp/shellcheck-${SHELLCHECK_VERSION}.linux.$(uname -m).tar.xz" -C /tmp
-RUN mv /tmp/shellcheck-${SHELLCHECK_VERSION}/shellcheck ${OUTDIR}/usr/bin
+# RUN wget -nv -O "/tmp/shellcheck-${SHELLCHECK_VERSION}.linux.$(uname -m).tar.xz" "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.$(uname -m).tar.xz"
+# RUN tar -xJf "/tmp/shellcheck-${SHELLCHECK_VERSION}.linux.$(uname -m).tar.xz" -C /tmp
+# RUN mv /tmp/shellcheck-${SHELLCHECK_VERSION}/shellcheck ${OUTDIR}/usr/bin
 
 # Hadolint linter
 ADD https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-x86_64 ${OUTDIR}/usr/bin/hadolint
 RUN chmod 555 ${OUTDIR}/usr/bin/hadolint
 
 # Hugo static site generator
-RUN set -eux; \
-    \
-    case $(uname -m) in \
-        x86_64) export HUGO_TAR=hugo_${HUGO_VERSION}_Linux-64bit.tar.gz;; \
-        aarch64) export HUGO_TAR=hugo_${HUGO_VERSION}_Linux-ARM64.tar.gz;; \
-        *) echo "unsupported architecture"; exit 1 ;; \
-    esac; \
-    \
-    wget -nv -O /tmp/${HUGO_TAR} https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/${HUGO_TAR}; \
-    tar -xzvf /tmp/${HUGO_TAR} -C /tmp; \
-    mv /tmp/hugo ${OUTDIR}/usr/bin
+# RUN set -eux; \
+#     \
+#     case $(uname -m) in \
+#         x86_64) export HUGO_TAR=hugo_${HUGO_VERSION}_Linux-64bit.tar.gz;; \
+#         aarch64) export HUGO_TAR=hugo_${HUGO_VERSION}_Linux-ARM64.tar.gz;; \
+#         *) echo "unsupported architecture"; exit 1 ;; \
+#     esac; \
+#     \
+#     wget -nv -O /tmp/${HUGO_TAR} https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/${HUGO_TAR}; \
+#     tar -xzvf /tmp/${HUGO_TAR} -C /tmp; \
+#     mv /tmp/hugo ${OUTDIR}/usr/bin
+
+# RUN git clone -b v${HUGO_VERSION} https://github.com/gohugoio/hugo.git
+# RUN cd hugo
+# RUN go build
+# RUN mv /root/go/bin/hugo ${OUTDIR}/usr/bin
+
+RUN curl --silent --header "X-JFrog-Art-Api:$ART_PASS" https://eu.artifactory.swg-devops.com/artifactory/sys-zaas-k8s-generic-local/istio/hugo_${HUGO_VERSION} --output "hugo"
+RUN mv hugo ${OUTDIR}/usr/bin; \
+chmod +x ${OUTDIR}/usr/bin/hugo
+
 
 # Helm version 3
-ADD https://get.helm.sh/helm-${HELM3_VERSION}-linux-${TARGETARCH}.tar.gz /tmp
+ADD https://get.helm.sh/helm-${HELM3_VERSION}-linux-s390x.tar.gz /tmp
 RUN mkdir /tmp/helm3
 RUN tar -xf /tmp/helm-${HELM3_VERSION}-linux-${TARGETARCH}.tar.gz -C /tmp/helm3
 RUN cp /tmp/helm3/linux-${TARGETARCH}/helm ${OUTDIR}/usr/bin/helm3
@@ -236,48 +252,66 @@ ADD https://storage.googleapis.com/kubernetes-release/release/v${KUBECTL_VERSION
 RUN chmod 555 ${OUTDIR}/usr/bin/kubectl
 
 # GCR docker credential helper
-ADD https://github.com/GoogleCloudPlatform/docker-credential-gcr/releases/download/v${GCR_AUTH_VERSION}/docker-credential-gcr_linux_${TARGETARCH}-${GCR_AUTH_VERSION}.tar.gz /tmp
-RUN tar -xzf /tmp/docker-credential-gcr_linux_${TARGETARCH}-${GCR_AUTH_VERSION}.tar.gz -C /tmp
-RUN mv /tmp/docker-credential-gcr ${OUTDIR}/usr/bin
+# This can be build with the master branch
+# ADD https://github.com/GoogleCloudPlatform/docker-credential-gcr/releases/download/v${GCR_AUTH_VERSION}/docker-credential-gcr_linux_${TARGETARCH}-${GCR_AUTH_VERSION}.tar.gz /tmp
+# RUN tar -xzf /tmp/docker-credential-gcr_linux_${TARGETARCH}-${GCR_AUTH_VERSION}.tar.gz -C /tmp
+# RUN mv /tmp/docker-credential-gcr ${OUTDIR}/usr/bin
 
-RUN wget -nv -O "${OUTDIR}/usr/bin/buf" "https://github.com/bufbuild/buf/releases/download/${BUF_VERSION}/buf-Linux-$(uname -m)" && \
-    chmod 555 "${OUTDIR}/usr/bin/buf"
+ADD https://github.com/bufbuild/buf/archive/refs/tags/${BUF_VERSION}.tar.gz /tmp
+RUN tar -zxvf ${BUF_VERSION}.tar.gz
+WORKDIR /tmp/buf-1.1.0
+RUN CGO_ENABLED=0 \
+  go build -ldflags "-s -w" -trimpath -o ${OUTDIR}/usr/bin/buf ./cmd/buf
+RUN chmod 555 "${OUTDIR}/usr/bin/buf"
 
 # Install su-exec which is a tool that operates like sudo without the overhead
-ADD https://github.com/ncopa/su-exec/archive/v${SU_EXEC_VERSION}.tar.gz /tmp
-RUN tar -xzvf v${SU_EXEC_VERSION}.tar.gz
-WORKDIR /tmp/su-exec-${SU_EXEC_VERSION}
-RUN make
-RUN cp -a su-exec ${OUTDIR}/usr/bin
 
-ADD https://github.com/GoogleContainerTools/kpt/releases/download/${KPT_VERSION}/kpt_linux_${TARGETARCH} ${OUTDIR}/usr/bin/kpt
-RUN chmod 555 ${OUTDIR}/usr/bin/kpt
+RUN curl --silent --header "X-JFrog-Art-Api:$ART_PASS" https://eu.artifactory.swg-devops.com/artifactory/sys-zaas-k8s-generic-local/istio/su-exec_${SU_EXEC_VERSION} --output "su-exec"
+RUN mv su-exec ${OUTDIR}/usr/bin; \
+chmod +x ${OUTDIR}/usr/bin/su-exec
+
+# ADD https://github.com/ncopa/su-exec/archive/v${SU_EXEC_VERSION}.tar.gz /tmp
+# RUN tar -xzvf v${SU_EXEC_VERSION}.tar.gz
+# WORKDIR /tmp/su-exec-${SU_EXEC_VERSION}
+# RUN make
+# RUN cp -a su-exec ${OUTDIR}/usr/bin
+
+# ADD https://github.com/GoogleContainerTools/kpt/releases/download/${KPT_VERSION}/kpt_linux_${TARGETARCH} ${OUTDIR}/usr/bin/kpt
+# RUN wget https://github.com/GoogleContainerTools/kpt/archive/refs/tags/v0.39.3.tar.gz
+# RUN tar -zxvf v0.39.3.tar.gz
+# RUN cd kpt-0.39.3/
+# RUN make
+# RUN cp /root/go/bin/kpt ${OUTDIR}/usr/bin/kpt
+
+RUN curl --silent --header "X-JFrog-Art-Api:$ART_PASS" https://eu.artifactory.swg-devops.com/artifactory/sys-zaas-k8s-generic-local/istio/kpt_${KPT_VERSION} --output "kpt"
+RUN mv kpt ${OUTDIR}/usr/bin; \
+chmod 555 ${OUTDIR}/usr/bin/kpt
 
 # Install gcloud command line tool
 # Install gcloud beta component
-RUN set -eux; \
-    \
-    case $(uname -m) in \
-        x86_64)  export GCLOUD_TAR_FILE="google-cloud-sdk-${GCLOUD_VERSION}-linux-x86_64.tar.gz" ;; \
-        aarch64) export GCLOUD_TAR_FILE="google-cloud-sdk-${GCLOUD_VERSION}-linux-arm.tar.gz" ;; \
-        *) echo "unsupported architecture"; exit 1 ;; \
-    esac; \
-    \
-    wget -nv "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/${GCLOUD_TAR_FILE}"; \
-    tar -xzvf ."/${GCLOUD_TAR_FILE}" -C "${OUTDIR}/usr/local" && rm "${GCLOUD_TAR_FILE}"; \
-    ${OUTDIR}/usr/local/google-cloud-sdk/bin/gcloud components install beta --quiet; \
-    ${OUTDIR}/usr/local/google-cloud-sdk/bin/gcloud components install alpha --quiet; \
-    rm -rf /usr/local/google-cloud-sdk/.install/.backup
+# RUN set -eux; \
+#     \
+#     case $(uname -m) in \
+#         s390x)  export GCLOUD_TAR_FILE="google-cloud-sdk-${GCLOUD_VERSION}-linux-s390x.tar.gz" ;; \
+#         aarch64) export GCLOUD_TAR_FILE="google-cloud-sdk-${GCLOUD_VERSION}-linux-arm.tar.gz" ;; \
+#         *) echo "unsupported architecture"; exit 1 ;; \
+#     esac; \
+#     \
+#     wget -nv "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/${GCLOUD_TAR_FILE}"; \
+#     tar -xzvf ."/${GCLOUD_TAR_FILE}" -C "${OUTDIR}/usr/local" && rm "${GCLOUD_TAR_FILE}"; \
+#     ${OUTDIR}/usr/local/google-cloud-sdk/bin/gcloud components install beta --quiet; \
+#     ${OUTDIR}/usr/local/google-cloud-sdk/bin/gcloud components install alpha --quiet; \
+#     rm -rf /usr/local/google-cloud-sdk/.install/.backup
 
 # Install cosign (for signing build artifacts) and verify signature
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-RUN set -eux; \
-    ${OUTDIR}/usr/local/google-cloud-sdk/bin/gsutil -q cp gs://cosign-releases/${COSIGN_VERSION}/cosign-linux-${TARGETARCH} /tmp/cosign \
-    && ${OUTDIR}/usr/local/google-cloud-sdk/bin/gsutil -q cat gs://cosign-releases/${COSIGN_VERSION}/cosign-linux-${TARGETARCH}.sig | base64 -d > /tmp/cosign.sig \
-    && wget -nv -O /tmp/cosign-pubkey https://raw.githubusercontent.com/sigstore/cosign/main/release/release-cosign.pub \
-    && openssl dgst -sha256 -verify /tmp/cosign-pubkey -signature /tmp/cosign.sig /tmp/cosign \
-    && chmod +x /tmp/cosign \
-    && mv /tmp/cosign ${OUTDIR}/usr/bin/ || exit 1
+# SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+# RUN set -eux; \
+#     ${OUTDIR}/usr/local/google-cloud-sdk/bin/gsutil -q cp gs://cosign-releases/${COSIGN_VERSION}/cosign-linux-${TARGETARCH} /tmp/cosign \
+#     && ${OUTDIR}/usr/local/google-cloud-sdk/bin/gsutil -q cat gs://cosign-releases/${COSIGN_VERSION}/cosign-linux-${TARGETARCH}.sig | base64 -d > /tmp/cosign.sig \
+#     && wget -nv -O /tmp/cosign-pubkey https://raw.githubusercontent.com/sigstore/cosign/main/release/release-cosign.pub \
+#     && openssl dgst -sha256 -verify /tmp/cosign-pubkey -signature /tmp/cosign.sig /tmp/cosign \
+#     && chmod +x /tmp/cosign \
+#     && mv /tmp/cosign ${OUTDIR}/usr/bin/ || exit 1
 
 # Cleanup stuff we don't need in the final image
 RUN rm -fr /usr/local/go/doc
@@ -315,6 +349,7 @@ RUN set -eux; \
     case $(uname -m) in \
         x86_64) export NODEJS_TAR=node-v${NODEJS_VERSION}-linux-x64.tar.gz;; \
         aarch64) export NODEJS_TAR=node-v${NODEJS_VERSION}-linux-arm64.tar.gz;; \
+        s390x) export NODEJS_TAR=node-v${NODEJS_VERSION}-linux-s390x.tar.gz;; \
         *) echo "unsupported architecture"; exit 1 ;; \
     esac; \
     wget -nv -O /tmp/${NODEJS_TAR} https://nodejs.org/download/release/v${NODEJS_VERSION}/${NODEJS_TAR}; \
@@ -479,7 +514,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ADD https://download.docker.com/linux/ubuntu/gpg /tmp/docker-key
 RUN apt-key add /tmp/docker-key
 ARG TARGETARCH
-RUN add-apt-repository "deb [arch=${TARGETARCH}] https://download.docker.com/linux/ubuntu $(lsb_release -sc) stable"
+RUN add-apt-repository "deb [arch=s390x] https://download.docker.com/linux/ubuntu $(lsb_release -sc) stable"
 RUN apt-get update
 RUN apt-get -y install --no-install-recommends docker-ce="${DOCKER_VERSION}" docker-ce-cli="${DOCKER_VERSION}" containerd.io="${CONTAINERD_VERSION}"
 
@@ -492,6 +527,9 @@ RUN set -eux; \
             ;; \
         aarch64) \
             export TRVIY_DEB_NAME="trivy_${TRIVY_VERSION}_Linux-ARM64.deb"; \
+            ;; \
+        s390x) \
+            export TRVIY_DEB_NAME="trivy_${TRIVY_VERSION}_Linux-s390x.deb"; \
             ;; \
         *) echo "unsupported architecture"; exit 1 ;; \
     esac; \
@@ -700,12 +738,9 @@ RUN mv ${BAZELISK_BIN} /usr/local/bin/bazel
 # Final image for proxy
 ########################
 
-FROM ubuntu:xenial AS build_env_proxy_amd64
-ENV UBUNTU_RELEASE_CODE_NAME=xenial
-FROM ubuntu:bionic AS build_env_proxy_arm64
 ENV UBUNTU_RELEASE_CODE_NAME=bionic
 # hadolint ignore=DL3006
-FROM build_env_proxy_${TARGETARCH} AS build_env_proxy
+FROM ubuntu:bionic AS build_env_proxy
 
 WORKDIR /
 
@@ -753,6 +788,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     ca-certificates \
     gcc \
+    clang \
     ssh \
     libltdl7 \
     libc-dev \
