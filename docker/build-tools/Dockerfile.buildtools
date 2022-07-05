@@ -1,0 +1,83 @@
+
+# Prepare final output image
+FROM scratch as build_tools
+
+# Version from build arguments
+ARG VERSION
+
+# Labels used by Docker
+LABEL "io.istio.repo"="https://github.com/istio/tools"
+LABEL "io.istio.version"="${VERSION}"
+
+# General
+ENV HOME=/home
+ENV LANG=C.UTF-8
+
+# Go support
+ENV GO111MODULE=on
+ENV GOPROXY=https://proxy.golang.org
+ENV GOSUMDB=sum.golang.org
+ENV GOROOT=/usr/local/go
+ENV GOPATH=/go
+ENV GOCACHE=/gocache
+ENV GOBIN=/gobin
+ENV PATH=/usr/local/go/bin:/gobin:/usr/local/google-cloud-sdk/bin:$PATH
+
+# Ruby suppport
+ENV RUBYOPT="-KU -E utf-8:utf-8"
+
+# Create the file system
+COPY --from=base_os_context:latest / /
+COPY --from=binary_tools_context:latest /out/ /
+COPY --from=binary_tools_context:latest /usr/local/go /usr/local/go
+
+COPY --from=nodejs_tools_context:latest /usr/local/bin /usr/local/bin
+COPY --from=nodejs_tools_context:latest /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=nodejs_tools_context:latest /node_modules /node_modules
+
+COPY --from=ruby_tools_context:latest /usr/bin /usr/bin
+COPY --from=ruby_tools_context:latest /usr/lib /usr/lib
+COPY --from=ruby_tools_context:latest /etc/alternatives /etc/alternatives
+COPY --from=ruby_tools_context:latest /var/lib/gems /var/lib/gems
+COPY --from=ruby_tools_context:latest /usr/local/bin /usr/local/bin
+
+#COPY --from=python_context:latest /usr/local/bin /usr/local/bin
+#COPY --from=python_context:latest /usr/local/lib /usr/local/lib
+
+# su-exec is used in place of complex sudo setup operations
+RUN chmod u+sx /usr/bin/su-exec
+
+COPY bashrc /home/.bashrc
+
+# mountpoints are mandatory for any host mounts.
+# mountpoints in /config are special.
+RUN mkdir -p /go && \
+    mkdir -p /gocache && \
+    mkdir -p /gobin && \
+    mkdir -p /config/.docker && \
+    mkdir -p /config/.config/gcloud && \
+    mkdir -p /config/.kube && \
+    mkdir -p /config-copy && \
+    mkdir -p /home/.cache && \
+    mkdir -p /home/.helm && \
+    mkdir -p /home/.gsutil
+
+# TODO must sort out how to use uid mapping in docker so these don't need to be 777
+# They are created as root 755.  As a result they are not writeable, which fails in
+# the developer environment as a volume or bind mount inherits the permissions of
+# the directory mounted rather then overridding with the permission of the volume file.
+RUN chmod 777 /go && \
+    chmod 777 /gocache && \
+    chmod 777 /gobin && \
+    chmod 777 /config && \
+    chmod 777 /config/.docker && \
+    chmod 777 /config/.config/gcloud && \
+    chmod 777 /config/.kube && \
+    chmod 777 /home/.cache && \
+    chmod 777 /home/.helm && \
+    chmod 777 /home/.gsutil
+
+WORKDIR /
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint"]
+

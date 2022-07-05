@@ -1,0 +1,28 @@
+
+FROM ubuntu:jammy as python_context
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    rustc \
+    cargo \
+    libc-dev \
+    pkg-config \
+    python3 \
+    python3-distutils \
+    python3-pip \
+    python3-setuptools
+
+# Install Python stuff
+RUN python3 -m pip install --no-cache-dir --upgrade pip==22.1.2
+RUN python3 -m pip install --no-cache-dir --no-binary :all: autopep8
+RUN python3 -m pip install --no-cache-dir yamllint
+RUN python3 -m pip install --no-cache-dir requests
+RUN python3 -m pip install --no-cache-dir protobuf
+RUN python3 -m pip install --no-cache-dir PyYAML
+RUN python3 -m pip install --no-cache-dir jwcrypto
+

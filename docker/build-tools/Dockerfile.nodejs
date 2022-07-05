@@ -1,0 +1,63 @@
+
+#############
+# Nodejs
+#############
+
+FROM ubuntu:focal as nodejs_tools_context
+
+# Pinned versions of stuff we pull in
+ENV BABEL_CLI_VERSION=v7.7.4
+ENV BABEL_CORE_VERSION=v7.7.4
+ENV BABEL_POLYFILL_VERSION=v7.7.0
+ENV BABEL_PRESET_ENV=v7.7.4
+ENV BABEL_PRESET_MINIFY_VERSION=v0.5.1
+ENV LINKINATOR_VERSION=v2.0.5
+ENV MARKDOWN_SPELLCHECK_VERSION=v1.3.1
+ENV NODEJS_VERSION=12.22.11
+ENV SASS_LINT_VERSION=v1.13.1
+ENV SASS_VERSION=v1.23.7
+ENV SVGO_VERSION=v1.3.0
+ENV SVGSTORE_CLI_VERSION=v1.3.1
+ENV TSLINT_VERSION=v5.20.0
+ENV TYPESCRIPT_VERSION=v3.7.2
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget ca-certificates
+
+RUN set -eux; \
+    case $(uname -m) in \
+        x86_64) export NODEJS_TAR=node-v${NODEJS_VERSION}-linux-x64.tar.gz;; \
+        aarch64) export NODEJS_TAR=node-v${NODEJS_VERSION}-linux-arm64.tar.gz;; \
+        s390x) export NODEJS_TAR=node-v${NODEJS_VERSION}-linux-s390x.tar.gz;; \
+        *) echo "unsupported architecture"; exit 1 ;; \
+    esac; \
+    wget -nv -O /tmp/${NODEJS_TAR} https://nodejs.org/download/release/v${NODEJS_VERSION}/${NODEJS_TAR}; \
+    tar -xzf /tmp/${NODEJS_TAR} --strip-components=1 -C /usr/local
+
+ADD https://nodejs.org/download/release/v${NODEJS_VERSION}/node-v${NODEJS_VERSION}-headers.tar.gz /tmp
+RUN tar -xzf /tmp/node-v${NODEJS_VERSION}-headers.tar.gz --strip-components=1 -C /usr/local
+
+RUN npm init -y
+RUN npm install --production --global \
+    sass@"${SASS_VERSION}" \
+    sass-lint@"${SASS_LINT_VERSION}" \
+    typescript@"${TYPESCRIPT_VERSION}" \
+    tslint@"${TSLINT_VERSION}" \
+    markdown-spellcheck@"${MARKDOWN_SPELLCHECK_VERSION}" \
+    svgstore-cli@"${SVGSTORE_CLI_VERSION}" \
+    svgo@"${SVGO_VERSION}" \
+    @babel/core@"${BABEL_CORE_VERSION}" \
+    @babel/cli@"${BABEL_CLI_VERSION}" \
+    @babel/preset-env@"${BABEL_PRESET_ENV_VERSION}" \
+    linkinator@"${LINKINATOR_VERSION}"
+
+RUN npm install --production --save-dev \
+    babel-preset-minify@${BABEL_PRESET_MINIFY_VERSION}
+
+RUN npm install --save-dev \
+    @babel/polyfill@${BABEL_POLYFILL_VERSION}
+
+# Clean up stuff we don't need in the final image
+RUN rm -rf /usr/local/sbin
+RUN rm -rf /usr/local/share
+

@@ -1,0 +1,300 @@
+
+################
+# Binary tools
+################
+
+ARG GOLANG_IMAGE=golang:1.18.2
+# hadolint ignore=DL3006
+FROM ${GOLANG_IMAGE} as binary_tools_context
+# TARGETARCH is an automatic platform ARG enabled by Docker BuildKit.
+ARG TARGETARCH=s390x
+
+# Istio tools SHA that we use for this image
+ARG ISTIO_TOOLS_SHA=5e0cab464228552e911b253eaed38cefcc9a13a8
+
+# Pinned versions of stuff we pull in
+ENV BOM_VERSION=v0.2.2
+ENV GCR_AUTH_VERSION=2.0.4
+ENV GO_BINDATA_VERSION=v3.1.2
+ENV GO_JUNIT_REPORT_VERSION=df0ed838addb0fa189c4d76ad4657f6007a5811c
+ENV GOCOVMERGE_VERSION=b5bfa59ec0adc420475f97f89b58045c721d761c
+ENV GOIMPORTS_VERSION=v0.1.0
+ENV BENCHSTAT_VERSION=9c9101da8316
+ENV GH_VERSION=2.10.1
+ENV GOLANG_PROTOBUF_VERSION=v1.27.1
+ENV GOLANG_GRPC_PROTOBUF_VERSION=v1.2.0
+# When updating the golangci version, you may want to update the common-files config/.golangci* files as well.
+ENV GOLANGCI_LINT_VERSION=v1.44.0
+ENV HADOLINT_VERSION=v2.10.0
+ENV HELM3_VERSION=v3.8.2
+ENV HUGO_VERSION=0.95.0
+ENV JB_VERSION=v0.3.1
+ENV JSONNET_VERSION=v0.15.0
+ENV JUNIT_MERGER_VERSION=adf1545b49509db1f83c49d1de90bbcb235642a8
+ENV K8S_CODE_GENERATOR_VERSION=1.23.4
+ENV K8S_TEST_INFRA_VERSION=2acdc6800510dd422bfd2a5d8c02aedc19d15f8d
+ENV KIND_VERSION=v0.12.0
+ENV KUBECTL_VERSION=1.23.4
+ENV PROTOC_GEN_GRPC_GATEWAY_VERSION=v1.8.6
+ENV PROTOC_GEN_SWAGGER_VERSION=v1.8.6
+ENV PROTOC_GEN_VALIDATE_VERSION=v0.6.7
+ENV PROTOC_VERSION=3.19.4
+ENV PROTOLOCK_VERSION=v0.14.0
+ENV PROTOTOOL_VERSION=v1.10.0
+ENV SHELLCHECK_VERSION=v0.8.0
+ENV SU_EXEC_VERSION=0.2
+ENV UPX_VERSION=3.96
+ENV YQ_VERSION=4.24.5
+ENV KPT_VERSION=v0.39.3
+ENV BUF_VERSION=v1.1.0
+ENV GCLOUD_VERSION=377.0.0
+ENV KUBETEST2_VERSION=92c12f91d13cbe9f17b62c7b0803d31e4c40431c
+ENV BOSKOSCTL_VERSION=c6d730e323f06da1b56dfa14bdab6d7d5dc22e2a
+ENV COSIGN_VERSION=v1.8.0
+ENV CRANE_VERSION=v0.8.0
+ENV ART_PASS=AKCp8k7aoAarCnWtCH4AJoSp86k3TiCo5YjqHYrVXYFhTb1V3Gf43VQuMUchfBCnuPBYVekRK
+ENV GO111MODULE=on
+ENV GOPROXY=https://proxy.golang.org
+
+WORKDIR /tmp
+ENV GOPATH=/tmp/go
+
+ENV OUTDIR=/out
+RUN mkdir -p ${OUTDIR}/usr/bin
+RUN mkdir -p ${OUTDIR}/usr/local
+
+# Update distro and install dependencies
+# hadolint ignore=DL3008
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    apt-transport-https \
+    build-essential \
+    ca-certificates \
+    curl \
+    shellcheck \
+    haskell-stack \
+    gnupg2 \
+    software-properties-common \
+    unzip \
+    xz-utils
+
+# Install protoc
+RUN set -eux; \
+    \
+    case $(uname -m) in \
+        x86_64) export PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-x86_64.zip;; \
+        aarch64) export PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-aarch_64.zip;; \
+        s390x) export PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-s390_64.zip;; \
+        *) echo "unsupported architecture"; exit 1 ;; \
+    esac; \
+    \
+    wget -nv -O "/tmp/${PROTOC_ZIP}" "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/${PROTOC_ZIP}"; \
+    unzip "/tmp/${PROTOC_ZIP}"; \
+    mv /tmp/bin/protoc ${OUTDIR}/usr/bin; \
+    chmod +x ${OUTDIR}/usr/bin/protoc
+
+# Install gh
+RUN curl --silent --header "X-JFrog-Art-Api:$ART_PASS" https://eu.artifactory.swg-devops.com/artifactory/sys-zaas-k8s-generic-local/istio/gh_${GH_VERSION} --output "gh"
+RUN mv gh ${OUTDIR}/usr/bin; \
+chmod +x ${OUTDIR}/usr/bin/gh
+# ADD https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.deb /tmp/
+# RUN dpkg -i /tmp/gh_${GH_VERSION}_linux_${TARGETARCH}.deb
+# RUN mv /usr/bin/gh ${OUTDIR}/usr/bin
+
+# Build and install a bunch of Go tools
+RUN go install -ldflags="-s -w" google.golang.org/protobuf/cmd/protoc-gen-go@${GOLANG_PROTOBUF_VERSION}
+RUN go install -ldflags="-s -w" google.golang.org/grpc/cmd/protoc-gen-go-grpc@${GOLANG_GRPC_PROTOBUF_VERSION}
+RUN go install -ldflags="-s -w" github.com/uber/prototool/cmd/prototool@${PROTOTOOL_VERSION}
+RUN go install -ldflags="-s -w" github.com/nilslice/protolock/cmd/protolock@${PROTOLOCK_VERSION}
+RUN go install -ldflags="-s -w" golang.org/x/tools/cmd/goimports@${GOIMPORTS_VERSION}
+RUN go install -ldflags="-s -w" github.com/golangci/golangci-lint/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}
+RUN go install -ldflags="-s -w" github.com/go-bindata/go-bindata/go-bindata@${GO_BINDATA_VERSION}
+RUN go install -ldflags="-s -w" github.com/envoyproxy/protoc-gen-validate@${PROTOC_GEN_VALIDATE_VERSION}
+RUN go install -ldflags="-s -w" github.com/grpc-ecosystem/grpc-gateway/protoc-gen-grpc-gateway@${PROTOC_GEN_GRPC_GATEWAY_VERSION}
+RUN go install -ldflags="-s -w" github.com/google/go-jsonnet/cmd/jsonnet@${JSONNET_VERSION}
+RUN go install -ldflags="-s -w" github.com/jsonnet-bundler/jsonnet-bundler/cmd/jb@${JB_VERSION}
+RUN go install -ldflags="-s -w" github.com/grpc-ecosystem/grpc-gateway/protoc-gen-swagger@${PROTOC_GEN_SWAGGER_VERSION}
+RUN go install -ldflags="-s -w" github.com/istio/go-junit-report@${GO_JUNIT_REPORT_VERSION}
+RUN go install -ldflags="-s -w" sigs.k8s.io/bom/cmd/bom@${BOM_VERSION}
+RUN go install -ldflags="-s -w" sigs.k8s.io/kind@${KIND_VERSION}
+RUN go install -ldflags="-s -w" github.com/wadey/gocovmerge@${GOCOVMERGE_VERSION}
+RUN go install -ldflags="-s -w" github.com/imsky/junit-merger/src/junit-merger@${JUNIT_MERGER_VERSION}
+RUN go install -ldflags="-s -w" golang.org/x/perf/cmd/benchstat@${BENCHSTAT_VERSION}
+RUN go install -ldflags="-s -w" github.com/google/go-containerregistry/cmd/crane@${CRANE_VERSION}
+
+# Install latest version of Istio-owned tools in this release
+RUN go install -ldflags="-s -w" istio.io/tools/cmd/protoc-gen-docs@${ISTIO_TOOLS_SHA}
+RUN go install -ldflags="-s -w" istio.io/tools/cmd/annotations_prep@${ISTIO_TOOLS_SHA}
+RUN go install -ldflags="-s -w" istio.io/tools/cmd/cue-gen@${ISTIO_TOOLS_SHA}
+RUN go install -ldflags="-s -w" istio.io/tools/cmd/envvarlinter@${ISTIO_TOOLS_SHA}
+RUN go install -ldflags="-s -w" istio.io/tools/cmd/testlinter@${ISTIO_TOOLS_SHA}
+RUN go install -ldflags="-s -w" istio.io/tools/cmd/protoc-gen-golang-deepcopy@${ISTIO_TOOLS_SHA}
+RUN go install -ldflags="-s -w" istio.io/tools/cmd/protoc-gen-golang-jsonshim@${ISTIO_TOOLS_SHA}
+RUN go install -ldflags="-s -w" istio.io/tools/cmd/kubetype-gen@${ISTIO_TOOLS_SHA}
+RUN go install -ldflags="-s -w" istio.io/tools/cmd/license-lint@${ISTIO_TOOLS_SHA}
+RUN go install -ldflags="-s -w" istio.io/tools/cmd/gen-release-notes@${ISTIO_TOOLS_SHA}
+RUN go install -ldflags="-s -w" k8s.io/code-generator/cmd/applyconfiguration-gen@kubernetes-${K8S_CODE_GENERATOR_VERSION}
+RUN go install -ldflags="-s -w" k8s.io/code-generator/cmd/defaulter-gen@kubernetes-${K8S_CODE_GENERATOR_VERSION}
+RUN go install -ldflags="-s -w" k8s.io/code-generator/cmd/client-gen@kubernetes-${K8S_CODE_GENERATOR_VERSION}
+RUN go install -ldflags="-s -w" k8s.io/code-generator/cmd/lister-gen@kubernetes-${K8S_CODE_GENERATOR_VERSION}
+RUN go install -ldflags="-s -w" k8s.io/code-generator/cmd/informer-gen@kubernetes-${K8S_CODE_GENERATOR_VERSION}
+RUN go install -ldflags="-s -w" k8s.io/code-generator/cmd/deepcopy-gen@kubernetes-${K8S_CODE_GENERATOR_VERSION}
+RUN go install -ldflags="-s -w" k8s.io/code-generator/cmd/go-to-protobuf@kubernetes-${K8S_CODE_GENERATOR_VERSION}
+
+# Install istio/test-infra tools
+RUN go install sigs.k8s.io/kubetest2@${KUBETEST2_VERSION}
+RUN go install sigs.k8s.io/kubetest2/kubetest2-gke@${KUBETEST2_VERSION}
+RUN go install sigs.k8s.io/kubetest2/kubetest2-tester-exec@${KUBETEST2_VERSION}
+
+# Go doesn't like the `replace` directives; need to do manual cloning now.
+# Should be fixed by https://github.com/kubernetes/test-infra/issues/20421
+# hadolint ignore=DL3003
+RUN git clone https://github.com/kubernetes/test-infra --branch master --single-branch && \
+  cd test-infra && \
+  git checkout "${K8S_TEST_INFRA_VERSION}" && \
+  go install ./robots/pr-creator && \
+  go install ./prow/cmd/peribolos && \
+  go install ./pkg/benchmarkjunit && \
+  cd .. && rm -rf test-infra
+# hadolint ignore=DL3003
+# RUN git clone --depth 1 https://github.com/istio/test-infra --branch master --single-branch && \
+#   cd test-infra && \
+#   go install ./toolbox/githubctl && \
+#   go install ./boskos/cmd/mason_client && \
+#   cd .. && rm -rf test-infra
+# # hadolint ignore=DL3003
+# RUN git clone --depth 1 https://github.com/kubernetes-sigs/boskos --branch master --single-branch && \
+#   cd boskos && \
+#   go install ./cmd/boskosctl && \
+#   cd .. && rm -rf boskos
+
+# Compress the Go tools and put them in their final location
+# ADD https://github.com/upx/upx/releases/download/v${UPX_VERSION}/upx-${UPX_VERSION}-${TARGETARCH}_linux.tar.xz /tmp
+# RUN tar -xJf upx-${UPX_VERSION}-${TARGETARCH}_linux.tar.xz -C /tmp
+# RUN mv /tmp/upx-${UPX_VERSION}-${TARGETARCH}_linux/upx /usr/bin
+# RUN upx --lzma /tmp/go/bin/*
+# RUN mv /tmp/go/bin/* ${OUTDIR}/usr/bin
+
+# Add gen-release-notes templates to filesystem
+RUN mkdir -p ${OUTDIR}/usr/share/gen-release-notes
+ADD https://raw.githubusercontent.com/istio/tools/master/cmd/gen-release-notes/templates/minorReleaseNotes.md ${OUTDIR}/usr/share/gen-release-notes
+ADD https://raw.githubusercontent.com/istio/tools/master/cmd/gen-release-notes/templates/releaseNotes.md ${OUTDIR}/usr/share/gen-release-notes
+ADD https://raw.githubusercontent.com/istio/tools/master/cmd/gen-release-notes/templates/upgradeNotes.md ${OUTDIR}/usr/share/gen-release-notes
+RUN chmod -R 555 ${OUTDIR}/usr/share/gen-release-notes
+
+# ShellCheck linter
+# RUN wget -nv -O "/tmp/shellcheck-${SHELLCHECK_VERSION}.linux.$(uname -m).tar.xz" "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.$(uname -m).tar.xz"
+# RUN tar -xJf "/tmp/shellcheck-${SHELLCHECK_VERSION}.linux.$(uname -m).tar.xz" -C /tmp
+# RUN mv /tmp/shellcheck-${SHELLCHECK_VERSION}/shellcheck ${OUTDIR}/usr/bin
+
+# Hadolint linter
+ADD https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-x86_64 ${OUTDIR}/usr/bin/hadolint
+RUN chmod 555 ${OUTDIR}/usr/bin/hadolint
+
+# Hugo static site generator
+# RUN set -eux; \
+#     \
+#     case $(uname -m) in \
+#         x86_64) export HUGO_TAR=hugo_${HUGO_VERSION}_Linux-64bit.tar.gz;; \
+#         aarch64) export HUGO_TAR=hugo_${HUGO_VERSION}_Linux-ARM64.tar.gz;; \
+#         *) echo "unsupported architecture"; exit 1 ;; \
+#     esac; \
+#     \
+#     wget -nv -O /tmp/${HUGO_TAR} https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/${HUGO_TAR}; \
+#     tar -xzvf /tmp/${HUGO_TAR} -C /tmp; \
+#     mv /tmp/hugo ${OUTDIR}/usr/bin
+
+# RUN git clone -b v${HUGO_VERSION} https://github.com/gohugoio/hugo.git
+# RUN cd hugo
+# RUN go build
+# RUN mv /root/go/bin/hugo ${OUTDIR}/usr/bin
+
+RUN curl --silent --header "X-JFrog-Art-Api:$ART_PASS" https://eu.artifactory.swg-devops.com/artifactory/sys-zaas-k8s-generic-local/istio/hugo_${HUGO_VERSION} --output "hugo"
+RUN mv hugo ${OUTDIR}/usr/bin; \
+chmod +x ${OUTDIR}/usr/bin/hugo
+
+
+# Helm version 3
+ADD https://get.helm.sh/helm-${HELM3_VERSION}-linux-s390x.tar.gz /tmp
+RUN mkdir /tmp/helm3
+RUN tar -xf /tmp/helm-${HELM3_VERSION}-linux-${TARGETARCH}.tar.gz -C /tmp/helm3
+RUN cp /tmp/helm3/linux-${TARGETARCH}/helm ${OUTDIR}/usr/bin/helm3
+RUN mv /tmp/helm3/linux-${TARGETARCH}/helm ${OUTDIR}/usr/bin/helm
+
+# yq doesn't support go modules, so install the binary instead
+ADD https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_${TARGETARCH} /tmp
+RUN mv /tmp/yq_linux_${TARGETARCH} ${OUTDIR}/usr/bin/yq
+RUN chmod 555 ${OUTDIR}/usr/bin/yq
+
+# Kubectl
+ADD https://storage.googleapis.com/kubernetes-release/release/v${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl ${OUTDIR}/usr/bin/kubectl
+RUN chmod 555 ${OUTDIR}/usr/bin/kubectl
+
+# GCR docker credential helper
+# This can be build with the master branch
+# ADD https://github.com/GoogleCloudPlatform/docker-credential-gcr/releases/download/v${GCR_AUTH_VERSION}/docker-credential-gcr_linux_${TARGETARCH}-${GCR_AUTH_VERSION}.tar.gz /tmp
+# RUN tar -xzf /tmp/docker-credential-gcr_linux_${TARGETARCH}-${GCR_AUTH_VERSION}.tar.gz -C /tmp
+# RUN mv /tmp/docker-credential-gcr ${OUTDIR}/usr/bin
+
+ADD https://github.com/bufbuild/buf/archive/refs/tags/${BUF_VERSION}.tar.gz /tmp
+RUN tar -zxvf ${BUF_VERSION}.tar.gz
+WORKDIR /tmp/buf-1.1.0
+RUN CGO_ENABLED=0 \
+  go build -ldflags "-s -w" -trimpath -o ${OUTDIR}/usr/bin/buf ./cmd/buf
+RUN chmod 555 "${OUTDIR}/usr/bin/buf"
+
+# Install su-exec which is a tool that operates like sudo without the overhead
+
+RUN curl --silent --header "X-JFrog-Art-Api:$ART_PASS" https://eu.artifactory.swg-devops.com/artifactory/sys-zaas-k8s-generic-local/istio/su-exec_${SU_EXEC_VERSION} --output "su-exec"
+RUN mv su-exec ${OUTDIR}/usr/bin; \
+chmod +x ${OUTDIR}/usr/bin/su-exec
+
+# ADD https://github.com/ncopa/su-exec/archive/v${SU_EXEC_VERSION}.tar.gz /tmp
+# RUN tar -xzvf v${SU_EXEC_VERSION}.tar.gz
+# WORKDIR /tmp/su-exec-${SU_EXEC_VERSION}
+# RUN make
+# RUN cp -a su-exec ${OUTDIR}/usr/bin
+
+# ADD https://github.com/GoogleContainerTools/kpt/releases/download/${KPT_VERSION}/kpt_linux_${TARGETARCH} ${OUTDIR}/usr/bin/kpt
+# RUN wget https://github.com/GoogleContainerTools/kpt/archive/refs/tags/v0.39.3.tar.gz
+# RUN tar -zxvf v0.39.3.tar.gz
+# RUN cd kpt-0.39.3/
+# RUN make
+# RUN cp /root/go/bin/kpt ${OUTDIR}/usr/bin/kpt
+
+RUN curl --silent --header "X-JFrog-Art-Api:$ART_PASS" https://eu.artifactory.swg-devops.com/artifactory/sys-zaas-k8s-generic-local/istio/kpt_${KPT_VERSION} --output "kpt"
+RUN mv kpt ${OUTDIR}/usr/bin; \
+chmod 555 ${OUTDIR}/usr/bin/kpt
+
+# Install gcloud command line tool
+# Install gcloud beta component
+# RUN set -eux; \
+#     \
+#     case $(uname -m) in \
+#         s390x)  export GCLOUD_TAR_FILE="google-cloud-sdk-${GCLOUD_VERSION}-linux-s390x.tar.gz" ;; \
+#         aarch64) export GCLOUD_TAR_FILE="google-cloud-sdk-${GCLOUD_VERSION}-linux-arm.tar.gz" ;; \
+#         *) echo "unsupported architecture"; exit 1 ;; \
+#     esac; \
+#     \
+#     wget -nv "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/${GCLOUD_TAR_FILE}"; \
+#     tar -xzvf ."/${GCLOUD_TAR_FILE}" -C "${OUTDIR}/usr/local" && rm "${GCLOUD_TAR_FILE}"; \
+#     ${OUTDIR}/usr/local/google-cloud-sdk/bin/gcloud components install beta --quiet; \
+#     ${OUTDIR}/usr/local/google-cloud-sdk/bin/gcloud components install alpha --quiet; \
+#     rm -rf /usr/local/google-cloud-sdk/.install/.backup
+
+# Install cosign (for signing build artifacts) and verify signature
+# SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+# RUN set -eux; \
+#     ${OUTDIR}/usr/local/google-cloud-sdk/bin/gsutil -q cp gs://cosign-releases/${COSIGN_VERSION}/cosign-linux-${TARGETARCH} /tmp/cosign \
+#     && ${OUTDIR}/usr/local/google-cloud-sdk/bin/gsutil -q cat gs://cosign-releases/${COSIGN_VERSION}/cosign-linux-${TARGETARCH}.sig | base64 -d > /tmp/cosign.sig \
+#     && wget -nv -O /tmp/cosign-pubkey https://raw.githubusercontent.com/sigstore/cosign/main/release/release-cosign.pub \
+#     && openssl dgst -sha256 -verify /tmp/cosign-pubkey -signature /tmp/cosign.sig /tmp/cosign \
+#     && chmod +x /tmp/cosign \
+#     && mv /tmp/cosign ${OUTDIR}/usr/bin/ || exit 1
+
+# Cleanup stuff we don't need in the final image
+RUN rm -fr /usr/local/go/doc
+RUN rm -fr /usr/local/go/test
+RUN rm -fr /usr/local/go/api
+RUN rm -fr /usr/local/go/bin/godoc
+RUN rm -fr /usr/local/go/bin/gofmt
+
