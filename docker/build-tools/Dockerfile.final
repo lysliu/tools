@@ -2,7 +2,7 @@
 # Final image for proxy
 ########################
 
-FROM ubuntu:bionic AS build_env_proxy
+FROM ubuntu:jammy AS build_env_proxy
 ENV UBUNTU_RELEASE_CODE_NAME=bionic
 
 WORKDIR /
@@ -120,7 +120,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libtool \
     llvm \
     ninja-build \
-    python \
     unzip \
     virtualenv
 
